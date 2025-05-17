@@ -4,83 +4,113 @@ import numpy as np
 import matplotlib.pyplot as plt
 import tensorflow
 from tensorflow.keras.models import load_model
-
-# Load the trained model
-model = load_model('receipt_forecast_model.h5')
-
-month_dict = {
-    "January" : 1, "February":2 , "March":3 , "April":4, "May":5, "June":6, 
-    "July":7, "August":8, "September":9, "October":10, "November":11, "December":12
-}
-
-def get_key(dictionary, target_value):
-    return [key for key, value in dictionary.items() if value == target_value][0]
+import pickle
+import os
+import xgboost as xgb
+import gdown
 
 
-st.set_option('deprecation.showPyplotGlobalUse', False)
+# Load the trained XGBoost model
+@st.cache_resource
+def load_model():
+    with open('./saved_models/best_model.pkl', 'rb') as f:
+        model = pickle.load(f)
+    return model
 
-st.write("""
-# Fetch Rewards: Monthly Receipt Count Forecaster
-*Monthly Receipt Counts in the year 2021*
-""")
+# Load the dataset and apply train-test split
+@st.cache_data
+def load_data():
+    data = pd.read_csv('./data/train_final.csv')
+    data['date'] = pd.to_datetime(data['date'])  # Ensure 'date' is in datetime format
+    split_date = '2014-01-01'
+    #train = data[data['date'] < split_date]  # Training data (not used in the app)
+    test = data[data['date'] >= split_date]  # Test data for predictions
+    return test
 
-# Load the data
-data_daily = pd.read_csv("data_daily.csv")
-data_daily['# Date'] = pd.to_datetime(data_daily['# Date'])
-data_monthly = data_daily.groupby(data_daily['# Date'].dt.to_period("M"))['Receipt_Count'].sum().reset_index()
-data_monthly.columns = ['Month', 'Receipt_Count']
+# Load model and test data
+model = load_model()
+test_data = load_data()
 
-# Convert 'Month' column to string for visualization purposes
-data_monthly['Month'] = data_monthly['Month'].astype(str)
+# Sidebar for user inputs
+st.sidebar.title("Sales Forecaster")
+st.sidebar.markdown("---")
+st.sidebar.write("### How it works:")
+st.sidebar.write("1. Select a store.")
+st.sidebar.write("2. Select an item (filtered based on the selected store).")
+st.sidebar.write("3. Choose a month to view its prediction data.")
+st.sidebar.markdown("---")
 
-max_val = data_monthly['Receipt_Count'].max()
-min_val = data_monthly['Receipt_Count'].min()
-data_normalized = (data_monthly['Receipt_Count'] - min_val) / (max_val - min_val)
+# User inputs
+store_nbr = st.sidebar.selectbox("Select Store Number", test_data['store_nbr'].unique())
 
-# Initialize the forecast with the last sequence from the training data
-forecast = data_normalized[-3:].tolist()
-# Create columns for side-by-side layout
-col1, col2 = st.columns(2)
+# Dynamically filter items based on the selected store
+filtered_items = test_data[test_data['store_nbr'] == store_nbr]['item_nbr'].unique()
+item_nbr = st.sidebar.selectbox("Select Item Number", filtered_items)
 
-# In the first column, display the plot
-with col1:
-    # Create the plot
-    plt.figure(figsize=(6, 6))
-    plt.plot(data_monthly['Month'], data_monthly['Receipt_Count'], marker='o', linestyle='-')
-    plt.title('Monthly Receipt Counts for 2021')
-    plt.xlabel('Month')
-    plt.ylabel('Receipt Count')
-    plt.grid(True)
-    plt.xticks(rotation=45)
-    plt.tight_layout()
+# Dynamically determine available months
+month_dict = {1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+              7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December"}
+available_months = [1, 2, 3]  # Only three months for prediction
+available_month_names = [month_dict[m] for m in available_months]
+selected_month = st.sidebar.selectbox("Select Month to View Prediction Data:", available_month_names)
 
-    # Display the plot in Streamlit
-    st.pyplot()
+# Map selected month back to numerical value
+selected_month_number = {v: k for k, v in month_dict.items()}[selected_month]
 
-# In the second column, display the data_monthly table
-with col2:
-    st.write(data_monthly)
+# Filter data for the selected store and item
+filtered_data = test_data[(test_data['store_nbr'] == store_nbr) & (test_data['item_nbr'] == item_nbr)]
 
+# Ensure filtered data is not empty
+if filtered_data.empty:
+    st.warning("No data available for the selected store and item.")
+else:
+    # Prepare data for forecasting
+    filtered_data = filtered_data[filtered_data['date'].dt.month.isin(available_months)]
+    if filtered_data.empty:
+        st.warning("No data available for the selected months.")
+    else:
+        # Prepare features for prediction
+        required_features = [
+            'store_nbr', 'item_nbr', 'onpromotion', 'year', 'month', 'day', 'day_of_week',
+            'unit_sales_7d_avg', 'perishable', 'oil_price', 'transactions', 'is_holiday',
+            'week', 'is_weekend', 'lag_1', 'lag_7', 'lag_30', 'rolling_mean_7', 'rolling_std_7'
+        ]
+        X = filtered_data[required_features]
 
-with st.sidebar:
-    st.title("2022 Monthly Receipt Count Forecaster: ")
-    st.markdown("---")
-    st.write("*How it works:*")
-    st.write("when you select a Month in 2022, the forecaster will predict all the Receipt counts from January to the selected month")
-    st.write("*Note:* By default January 2022 is selected and its prediction is given")
-    st.markdown("---")
-    month = st.selectbox("Select Month in 2022 to forecast:", ["January", "February", "March", "April", "May", "June", 
-                                           "July", "August", "September", "October", "November", "December"])
-    # Predict next 12 months
-    for _ in range(month_dict[month]):
-        next_seq = model.predict(np.array([forecast[-3:]]))[0][0]
-        forecast.append(next_seq)
+        # Make predictions
+        filtered_data['Predicted Sales'] = model.predict(X)
 
-    # Extract only the forecasted 12 months
-    forecasted_values = forecast[-month_dict[month]:]
+        # Display predicted sales for the selected month in the sidebar
+        st.sidebar.markdown("### Predicted Sales:")
+        for month in available_months:
+            if month <= selected_month_number:
+                month_data = filtered_data[filtered_data['date'].dt.month == month]
+                predicted_sales = month_data['Predicted Sales'].sum()
+                st.sidebar.write(f"{month_dict[month]}'s predicted sales = {predicted_sales:.0f}")
 
-    # Denormalize the forecasted data
-    forecast_denorm = np.array(forecasted_values) * (max_val - min_val) + min_val
+        # Line Chart: Predicted Sales for Three Months
+        st.title("Sales Forecast")
+        st.markdown(f"### Predictions for Store {store_nbr} and Item {item_nbr}")
+        st.markdown("### Predicted Sales for Three Months")
+        plt.figure(figsize=(10, 6))
+        for month in available_months:
+            month_data = filtered_data[filtered_data['date'].dt.month == month]
+            plt.plot(month_data['date'], month_data['Predicted Sales'], marker='o', label=f"{month_dict[month]}")
+        plt.xlabel("Date")
+        plt.ylabel("Predicted Sales")
+        plt.title("Predicted Sales for Three Months")
+        plt.grid(True)
+        plt.legend()
+        st.pyplot(plt)
 
-    for i, value in enumerate(forecast_denorm):
-        st.write("{}'s receipt count = {:.0f}".format(get_key(month_dict, i+1), value))
+        # Table: Display prediction data for the selected month
+        st.markdown(f"### Prediction Data for {selected_month}")
+        selected_month_data = filtered_data[filtered_data['date'].dt.month == selected_month_number]
+        if selected_month_data.empty:
+            st.warning(f"No data available for {selected_month}.")
+        else:
+            table_data = selected_month_data[['date', 'month', 'Predicted Sales']].copy()
+            table_data['date'] = table_data['date'].dt.strftime('%Y-%m-%d')  # Format the date
+            table_data['month'] = table_data['month'].map(month_dict)
+            table_data.rename(columns={'month': 'Month Name'}, inplace=True)
+            st.dataframe(table_data)
