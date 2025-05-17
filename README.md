@@ -1,4 +1,4 @@
-# Forecaster-app for Forcasting
+# Forecaster-app
 The app can be accessed with the following link: https://forecaster-app-lhdlo22sdhvfdoipcwn5vi.streamlit.app/
 
 # How it works
