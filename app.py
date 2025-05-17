@@ -7,7 +7,7 @@ from tensorflow.keras.models import load_model
 import pickle
 import os
 import xgboost as xgb
-#import gdown
+import gdown
 
 
 # Load the trained XGBoost model
@@ -20,16 +20,43 @@ def load_model():
 # Load the dataset and apply train-test split
 @st.cache_data
 def load_data():
-    data = pd.read_csv('./data/train_final.csv')
-    data['date'] = pd.to_datetime(data['date'])  # Ensure 'date' is in datetime format
+    # Google Drive file ID
+    file_id = "17PLomDukjPaGJLj7hipzSyJOQMNTMwvj" 
+    url = f"https://drive.google.com/uc?id={file_id}&confirm=t"
+    output = "./data/train_final.csv"
+
+    # Download the file if it doesn't already exist
+    if not os.path.exists(output):
+        gdown.download(url, output, quiet=False, use_cookies=False)
+
+    # Validate the downloaded file size
+    if os.path.exists(output):
+        file_size = os.path.getsize(output)
+        if file_size < 1e6:  # File size less than 1 MB
+            os.remove(output)  # Delete the file
+            st.error("Downloaded file is too small. Please check the file ID and permissions.")
+            return None
+        
+    # Load the dataset
+    try:
+        data = pd.read_csv(output)
+        st.toast("Data successfully loaded!")
+    except Exception as e:
+        st.error(f"Failed to load data: {e}")
+        return None
+
+    # Ensure 'date' column is in datetime format
+    data['date'] = pd.to_datetime(data['date'])
     split_date = '2014-01-01'
-    #train = data[data['date'] < split_date]  # Training data (not used in the app)
     test = data[data['date'] >= split_date]  # Test data for predictions
     return test
 
 # Load model and test data
 model = load_model()
 test_data = load_data()
+if test_data is None:
+    st.error("Failed to load data. Please ensure the file is available.")
+    st.stop()
 
 # Sidebar for user inputs
 st.sidebar.title("Sales Forecaster")
