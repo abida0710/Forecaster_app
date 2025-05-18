@@ -40,7 +40,6 @@ def load_data():
     # Load the dataset
     try:
         data = pd.read_csv(output)
-        st.toast("Data successfully loaded!")
     except Exception as e:
         st.error(f"Failed to load data: {e}")
         return None
@@ -54,6 +53,11 @@ def load_data():
 # Load model and test data
 model = load_model()
 test_data = load_data()
+
+# Display a success message after loading data
+if test_data is not None:
+    st.toast("Data successfully loaded!")
+
 if test_data is None:
     st.error("Failed to load data. Please ensure the file is available.")
     st.stop()
@@ -66,6 +70,8 @@ st.sidebar.write("1. Select a store.")
 st.sidebar.write("2. Select an item (filtered based on the selected store).")
 st.sidebar.write("3. Choose a month to view its prediction data.")
 st.sidebar.markdown("---")
+
+
 
 # User inputs
 store_nbr = st.sidebar.selectbox("Select Store Number", test_data['store_nbr'].unique())
@@ -116,7 +122,7 @@ else:
                 st.sidebar.write(f"{month_dict[month]}'s predicted sales = {predicted_sales:.0f}")
 
         # Line Chart: Predicted Sales for Three Months
-        st.title("Sales Forecast")
+        st.title("Sales Forecast of Guayes Region from January to March 2014")
         st.markdown(f"### Predictions for Store {store_nbr} and Item {item_nbr}")
         st.markdown("### Predicted Sales for Three Months")
         plt.figure(figsize=(10, 6))
@@ -141,3 +147,6 @@ else:
             table_data['month'] = table_data['month'].map(month_dict)
             table_data.rename(columns={'month': 'Month Name'}, inplace=True)
             st.dataframe(table_data)
+st.sidebar.markdown("---")
+# Authentication
+st.sidebar.write("##### \u00A9 Abida Sultana")
